@@ -20,6 +20,16 @@ DESTINATION_CHANNELS = [
     "@bluepipsgoldbtc",
     "@tradewithfundamentalandtecnicala",
     "@narketnewssupclas",
+
+    "@GoldMarketSignals1k",
+    "@GoldSignals_T",
+    "@TradeInsightMaster19",
+    "@blueEdgeTradin",
+    "@DiamondTradeFx2",
+    "@dolarmanroyalteam",
+    "@forextradingsignals181",
+    "@agagsgzvsvsjsksns",
+    "@forextradingsignals080",
 ]
 
 app = Flask(__name__)
