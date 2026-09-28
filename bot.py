@@ -13,6 +13,7 @@ from telegram.ext import Application, MessageHandler, ContextTypes, filters
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 SOURCE_CHANNEL = "@XauusdGoldMaster05"
+"@TREND_WAVE_FX"
 
 DESTINATION_CHANNELS = [
     "@xauuusdgoldsignals292",
