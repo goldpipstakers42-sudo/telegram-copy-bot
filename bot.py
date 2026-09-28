@@ -3,26 +3,16 @@ import asyncio
 
 from flask import Flask, request
 from telegram import Update, ReplyParameters
-from telegram.ext import Application, MessageHandler, filters
+from telegram.ext import Application, MessageHandler, ContextTypes, filters
 
 
-# =========================
-# BOT TOKEN
-# =========================
+# =========================================================
+# SETTINGS
+# =========================================================
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-
-
-# =========================
-# MAIN / SOURCE CHANNEL
-# =========================
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 SOURCE_CHANNEL = "@XauusdGoldMaster05"
-
-
-# =========================
-# DESTINATION CHANNELS
-# =========================
 
 DESTINATION_CHANNELS = [
     "@xauuusdgoldsignals292",
@@ -41,16 +31,16 @@ DESTINATION_CHANNELS = [
 ]
 
 
-# =========================
+# =========================================================
 # FLASK
-# =========================
+# =========================================================
 
 app = Flask(__name__)
 
 
-# =========================
+# =========================================================
 # TELEGRAM APPLICATION
-# =========================
+# =========================================================
 
 telegram_app = (
     Application.builder()
@@ -60,37 +50,42 @@ telegram_app = (
 )
 
 
-# ==========================================================
+# =========================================================
 # MESSAGE MAPPING
 #
-# Main channel message ID
-#        ↓
-# Destination channel message ID
+# source message ID
+#       ↓
+# destination channel
+#       ↓
+# destination message ID
 #
 # Example:
-# Main message 500
-#        ↓
-# Blue Edge message 1200
-# ==========================================================
+# {
+#   123: {
+#       "@channel1": 456,
+#       "@channel2": 789
+#   }
+# }
+# =========================================================
 
 message_map = {}
 
 
-# ==========================================================
-# COPY CHANNEL POST
-# ==========================================================
+# =========================================================
+# COPY CHANNEL MESSAGE
+# =========================================================
 
-async def copy_channel_post(update, context):
+async def copy_channel_post(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     message = update.channel_post
 
     if not message:
         return
 
-    # ------------------------------------------
-    # Make sure this is our MAIN channel
-    # ------------------------------------------
-
+    # Only copy from our main/source channel
     if not message.chat.username:
         return
 
@@ -99,142 +94,146 @@ async def copy_channel_post(update, context):
     if source_username.lower() != SOURCE_CHANNEL.lower():
         return
 
-    source_message_id = message.message_id
-
     print(
-        f"New message from {SOURCE_CHANNEL}: "
-        f"{source_message_id}"
+        f"Received message from source: "
+        f"{source_username} | "
+        f"Message ID: {message.message_id}"
     )
 
 
-    # ------------------------------------------
-    # Check whether this message is a REPLY
-    # to another message in the main channel
-    # ------------------------------------------
+    # =====================================================
+    # CHECK IF THIS MESSAGE IS A REPLY
+    # =====================================================
 
-    reply_parameters = None
+    is_reply = message.reply_to_message is not None
 
-    if message.reply_to_message:
+    parent_map = {}
 
-        original_reply_id = message.reply_to_message.message_id
+    if is_reply:
+
+        parent_source_id = message.reply_to_message.message_id
 
         print(
-            f"Message {source_message_id} is a reply to "
-            f"message {original_reply_id}"
+            f"This is a reply to source message: "
+            f"{parent_source_id}"
         )
 
-        # --------------------------------------
-        # Find the copied parent message
-        # for every destination channel
-        # --------------------------------------
+        parent_map = message_map.get(
+            parent_source_id,
+            {}
+        )
 
-    # Save destination message IDs here
-    destination_mapping = {}
+        # If we don't know the original copied message,
+        # don't send the update as a standalone message.
+        if not parent_map:
+
+            print(
+                "Parent message mapping not found. "
+                "Reply skipped."
+            )
+
+            return
 
 
-    # ======================================================
-    # SEND TO ALL DESTINATION CHANNELS
-    # ======================================================
+    # =====================================================
+    # STORE DESTINATION MESSAGE IDs
+    # =====================================================
+
+    current_message_map = {}
+
+
+    # =====================================================
+    # COPY TO ALL DESTINATION CHANNELS
+    # =====================================================
 
     for destination in DESTINATION_CHANNELS:
 
         try:
 
-            # ------------------------------------------
-            # If this message is a reply, find the
-            # corresponding copied parent message
-            # ------------------------------------------
+            copy_arguments = {
+                "chat_id": destination,
+                "from_chat_id": message.chat.id,
+                "message_id": message.message_id,
+            }
 
-            reply_parameters = None
 
-            if message.reply_to_message:
+            # =================================================
+            # IF SOURCE MESSAGE IS A REPLY
+            # MAKE DESTINATION MESSAGE A REPLY TOO
+            # =================================================
 
-                original_reply_id = (
-                    message.reply_to_message.message_id
-                )
+            if is_reply:
 
-                destination_messages = message_map.get(
-                    original_reply_id,
-                    {}
-                )
-
-                copied_parent_id = destination_messages.get(
+                destination_parent_id = parent_map.get(
                     destination
                 )
 
-                if copied_parent_id:
-
-                    reply_parameters = ReplyParameters(
-                        message_id=copied_parent_id
-                    )
+                if not destination_parent_id:
 
                     print(
-                        f"Reply link created: "
-                        f"{source_message_id} -> "
-                        f"{copied_parent_id} "
-                        f"in {destination}"
+                        f"No parent mapping for "
+                        f"{destination}. Skipping."
                     )
 
-                else:
+                    continue
 
-                    print(
-                        f"WARNING: Parent message "
-                        f"{original_reply_id} not found "
-                        f"for {destination}"
+
+                copy_arguments["reply_parameters"] = (
+                    ReplyParameters(
+                        message_id=destination_parent_id
                     )
+                )
 
 
-            # ------------------------------------------
-            # COPY THE MESSAGE
-            # ------------------------------------------
+            # =================================================
+            # COPY MESSAGE
+            # =================================================
 
             copied_message = await context.bot.copy_message(
-                chat_id=destination,
-                from_chat_id=message.chat.id,
-                message_id=source_message_id,
-                reply_parameters=reply_parameters
+                **copy_arguments
             )
 
 
-            # ------------------------------------------
-            # SAVE THE COPIED MESSAGE ID
-            # ------------------------------------------
-
-            destination_mapping[destination] = (
+            # Save destination message ID
+            current_message_map[destination] = (
                 copied_message.message_id
             )
 
+
             print(
-                f"Copied {source_message_id} -> "
-                f"{copied_message.message_id} "
-                f"to {destination}"
+                f"Copied to {destination} "
+                f"-> message ID "
+                f"{copied_message.message_id}"
             )
 
 
         except Exception as e:
 
             print(
-                f"ERROR copying message "
-                f"{source_message_id} "
-                f"to {destination}: {e}"
+                f"ERROR copying to "
+                f"{destination}: {e}"
             )
 
 
-    # ======================================================
-    # SAVE MAPPING
-    # ======================================================
+    # =====================================================
+    # SAVE THIS SOURCE MESSAGE'S DESTINATION MAPPINGS
+    # =====================================================
 
-    message_map[source_message_id] = destination_mapping
+    if current_message_map:
 
-    print(
-        f"Mapping saved for message "
-        f"{source_message_id}"
-    )
+        message_map[message.message_id] = (
+            current_message_map
+        )
+
+        print(
+            f"Saved mapping for source message "
+            f"{message.message_id}"
+        )
 
 
-# ==========================================================
-# HANDLER
-# ==========================================================
+# =========================================================
+# TELEGRAM HANDLER
+# =========================================================
 
 telegram_app.add_handler(
     MessageHandler(
@@ -244,22 +243,22 @@ telegram_app.add_handler(
 )
 
 
-# ==========================================================
+# =========================================================
 # HOME PAGE
-# ==========================================================
+# =========================================================
 
-@app.route("/")
+@app.route("/", methods=["GET"])
 def home():
 
-    return "Telegram Copy Bot is running!"
+    return "Telegram Copy Bot is running."
 
 
-# ==========================================================
+# =========================================================
 # WEBHOOK
-# ==========================================================
+# =========================================================
 
 @app.route("/webhook", methods=["POST"])
-async def webhook():
+def webhook():
 
     try:
 
@@ -270,20 +269,28 @@ async def webhook():
             telegram_app.bot
         )
 
-        await telegram_app.process_update(update)
+        # IMPORTANT:
+        # This is a synchronous Flask route.
+        # It avoids Flask async-view problems.
+        asyncio.run(
+            telegram_app.process_update(update)
+        )
 
-        return "OK"
+        return "OK", 200
+
 
     except Exception as e:
 
-        print(f"Webhook error: {e}")
+        print(
+            f"WEBHOOK ERROR: {e}"
+        )
 
         return "ERROR", 500
 
 
-# ==========================================================
-# SET WEBHOOK
-# ==========================================================
+# =========================================================
+# SET TELEGRAM WEBHOOK
+# =========================================================
 
 async def setup_telegram():
 
@@ -296,29 +303,34 @@ async def setup_telegram():
     if not render_url:
 
         raise RuntimeError(
-            "RENDER_EXTERNAL_URL is not set"
+            "RENDER_EXTERNAL_URL is not set."
         )
+
 
     webhook_url = (
         render_url.rstrip("/")
         + "/webhook"
     )
 
+
     await telegram_app.bot.set_webhook(
         url=webhook_url,
         allowed_updates=[
-            "channel_post"
-        ]
+            "channel_post",
+            "edited_channel_post",
+        ],
     )
+
 
     print(
-        f"Webhook set to: {webhook_url}"
+        "Webhook set to:",
+        webhook_url
     )
 
 
-# ==========================================================
-# START
-# ==========================================================
+# =========================================================
+# START SERVER
+# =========================================================
 
 if __name__ == "__main__":
 
