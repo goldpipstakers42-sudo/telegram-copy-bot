@@ -27,6 +27,7 @@ DESTINATION_CHANNELS = [
     "@DiamondTradeFx2",
     "@dolarmanroyalteam",
     "@forextradingsignals181",
+    "@educationalCommunity10",
     "@agagsgzvsvsjsksns",
 ]
 
